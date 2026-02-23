@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────
 //  BACKEND SERVER  —  inkparse-server.js
-//  Scrivly API — proxies requests to OpenAI securely
+//  InkParse API — proxies requests to OpenAI securely
 // ─────────────────────────────────────────────────────────────
 
 require("dotenv").config();
@@ -31,7 +31,7 @@ app.use(cors({
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type"]
 }));
-app.use(express.json({ limit: "20mb" }));
+app.use(express.json({ limit: "50mb" })); // increased for multiple images
 
 // ── Health check ──────────────────────────────────────────────
 app.get("/health", (_req, res) => {
@@ -39,7 +39,6 @@ app.get("/health", (_req, res) => {
 });
 
 // ── Prompt ────────────────────────────────────────────────────
-// Separated out for readability and easy iteration.
 const SYSTEM_PROMPT = `You are Scrivly, a specialist in converting handwritten notes into structured digital documents. You have expert-level skill in reading difficult handwriting — messy, rotated, faded, annotated.
 
 Your job has two outputs: (1) faithful, well-structured Markdown notes and (2) a logically sound Mermaid flowchart.
@@ -76,62 +75,101 @@ QUALITY RULES:
 - Side notes and margin annotations belong in the section they annotate, indented with a > blockquote.
 - Do NOT add any information that isn't in the image.
 - Do NOT rewrite or paraphrase — transcribe what is written.
+- If multiple images are provided, treat them as sequential pages of the same document. Combine them into one coherent set of notes with ## Page N headings where pages differ significantly.
 
 ───────────────────────────────────────────────
 PART 3 — MERMAID FLOWCHART
 ───────────────────────────────────────────────
-Generate a Mermaid flowchart that represents the LOGICAL STRUCTURE or PROCESS in the notes. Choose the right type:
+Generate a Mermaid flowchart that represents the LOGICAL STRUCTURE or PROCESS across ALL provided images/pages.
 
-  TYPE A — Process/Procedure notes (how-to, steps, instructions, experiments):
-    → Sequential flow with decision points. Show the actual process steps in order.
+  TYPE A — Process/Procedure notes: Sequential flow with decision points.
+  TYPE B — Concept/Study notes: Concept map from main topic outward.
+  TYPE C — Mixed: Hybrid spine with branching details.
 
-  TYPE B — Concept/Study notes (theory, definitions, relationships):
-    → Concept map. Start from the main topic and branch into sub-topics/relationships.
-
-  TYPE C — Mixed or Narrative notes:
-    → Hybrid: a spine of main points, with branches for details or decisions.
-
-STRICT MERMAID RULES (violations break the renderer):
+STRICT MERMAID RULES:
   ✓ First line must be exactly: flowchart TD
-  ✓ Each node ID: letters and numbers only (A, B1, Step3) — no spaces or symbols
+  ✓ Node IDs: letters and numbers only (A, B1, Step3)
   ✓ Node labels: plain words only, max 6 words, NO quotes, NO parentheses inside [], NO special characters
-  ✓ Shapes: [process step], {decision or question?}, ([start or end terminal])
-  ✓ Arrows: --> for plain, -->|label| for labelled (label max 3 words, no special chars)
-  ✓ Line format: exactly two spaces before each node line
+  ✓ Shapes: [process step], {decision?}, ([start or end terminal])
+  ✓ Arrows: --> for plain, -->|label| for labelled (label max 3 words)
   ✗ NEVER use: quotes inside labels, colons in labels, equals signs, brackets inside brackets, semicolons, HTML tags
-  ✓ 6–12 nodes is ideal. Never fewer than 4, never more than 14.
-  ✓ Every node must be reachable from the start node.
-  ✓ The flowchart must reflect the ACTUAL content — not a generic placeholder.
+  ✓ 6–12 nodes ideal. Never fewer than 4, never more than 14.
+  ✓ Every node reachable from start.
 
 ───────────────────────────────────────────────
 OUTPUT FORMAT — STRICT
 ───────────────────────────────────────────────
-Return ONLY a raw JSON object. Absolutely no text before or after it. No markdown fences. No backticks.
+Return ONLY a raw JSON object. No text before or after. No markdown fences. No backticks.
 
 {
   "title": "Short descriptive title (5–8 words max)",
-  "subject": "Subject or domain of the notes (e.g. Biology, Project Planning, Chemistry)",
-  "notes": "Full markdown — every readable word from the image",
+  "subject": "Subject or domain of the notes",
+  "notes": "Full markdown — every readable word from the image(s)",
   "mermaidCode": "flowchart TD\\n  A([Start]) --> B[First Step]\\n  ..."
 }
 
-In mermaidCode: newlines must be the two-character sequence \\n (backslash + n), not actual line breaks.
-In notes: use actual newlines (the string may be multi-line JSON).
+In mermaidCode: newlines must be \\n (backslash + n), not actual line breaks.
+In notes: use actual newlines.
 Escape all double-quote characters inside string values with \\".`;
 
-// ── Main endpoint: analyze notes image ───────────────────────
-app.post("/api/analyze", async (req, res) => {
-  const { imageBase64, imageMime = "image/jpeg" } = req.body;
+// ── Helper: build content blocks for one or many images ───────
+function buildImageBlocks(imageList) {
+  // imageList: [{ imageBase64, imageMime }]
+  const blocks = [];
 
-  if (!imageBase64) {
-    return res.status(400).json({ error: "Missing imageBase64 in request body" });
+  imageList.forEach(({ imageBase64, imageMime = "image/jpeg" }, i) => {
+    if (imageList.length > 1) {
+      blocks.push({
+        type: "text",
+        text: `Image ${i + 1} of ${imageList.length}:`
+      });
+    }
+    blocks.push({
+      type: "image_url",
+      image_url: {
+        url: `data:${imageMime};base64,${imageBase64}`,
+        detail: "high"
+      }
+    });
+  });
+
+  blocks.push({
+    type: "text",
+    text: imageList.length > 1
+      ? `Please analyse all ${imageList.length} handwritten note images above as sequential pages of the same document. Return the combined JSON object described in your instructions.`
+      : `Please analyse this handwritten notes image and return the JSON object described in your instructions. Be thorough — capture every word you can read.`
+  });
+
+  return blocks;
+}
+
+// ── Main endpoint: analyze notes image(s) ────────────────────
+app.post("/api/analyze", async (req, res) => {
+  const { imageBase64, imageMime, images } = req.body;
+
+  // Normalise into a list regardless of input shape
+  let imageList = [];
+
+  if (images && Array.isArray(images) && images.length > 0) {
+    // Multi-image payload: { images: [{ imageBase64, imageMime }, ...] }
+    imageList = images;
+    const bad = imageList.find(img => !img.imageBase64);
+    if (bad) {
+      return res.status(400).json({ error: "Each image entry must include imageBase64" });
+    }
+  } else if (imageBase64) {
+    // Single-image payload (backwards-compatible)
+    imageList = [{ imageBase64, imageMime: imageMime || "image/jpeg" }];
+  } else {
+    return res.status(400).json({ error: "Missing imageBase64 or images array in request body" });
   }
+
+  console.log(`📸 Analysing ${imageList.length} image(s)…`);
 
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       max_tokens: 4096,
-      // temperature slightly lowered for more faithful transcription
       temperature: 0.2,
       messages: [
         {
@@ -140,21 +178,7 @@ app.post("/api/analyze", async (req, res) => {
         },
         {
           role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:${imageMime};base64,${imageBase64}`,
-                detail: "high"
-              }
-            },
-            {
-              type: "text",
-              // Concise user turn — all instructions are in the system prompt.
-              // Repeating the output format here helps GPT-4o stay on track.
-              text: `Please analyse this handwritten notes image and return the JSON object described in your instructions. Be thorough — capture every word you can read. The mermaidCode must reflect the actual content of these specific notes.`
-            }
-          ]
+          content: buildImageBlocks(imageList)
         }
       ]
     });
@@ -165,22 +189,18 @@ app.post("/api/analyze", async (req, res) => {
     // ── Parse & sanitize ──────────────────────────────────────
     let parsed;
     try {
-      // 1. Strip any markdown fences the model snuck in
       let clean = text
         .replace(/^```json\s*/i, "")
         .replace(/^```\s*/i, "")
         .replace(/```\s*$/i, "")
         .trim();
 
-      // 2. Extract the JSON object if surrounded by prose
       const objMatch = clean.match(/(\{[\s\S]*\})/);
       if (objMatch) clean = objMatch[1];
 
-      // 3. Try direct parse first
       try {
         parsed = JSON.parse(clean);
       } catch (_) {
-        // 4. Fix unescaped backslashes (common GPT-4o issue in mermaidCode)
         const fixed = clean.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
         parsed = JSON.parse(fixed);
       }
@@ -191,24 +211,18 @@ app.post("/api/analyze", async (req, res) => {
     }
 
     // ── Sanitize fields ───────────────────────────────────────
-
-    // Normalise line endings in mermaidCode
     if (parsed.mermaidCode) {
       parsed.mermaidCode = parsed.mermaidCode
         .replace(/\r\n/g, "\n")
         .replace(/\r/g, "\n")
-        // Remove any illegal characters from node labels
-        // (quotes and colons inside [] or {} break the renderer)
         .replace(/\[([^\]]*?)["':=]([^\]]*?)\]/g, (_, a, b) => `[${a}${b}]`)
         .replace(/\{([^\}]*?)["':=]([^\}]*?)\}/g, (_, a, b) => `{${a}${b}}`);
     }
 
-    // Remove stray backslashes from notes (except valid markdown)
     if (parsed.notes) {
       parsed.notes = parsed.notes.replace(/\\(?![*_`#>\-\[\]])/g, "");
     }
 
-    // Fallback title if missing
     if (!parsed.title) parsed.title = "Handwritten Notes";
 
     res.json(parsed);
@@ -219,7 +233,7 @@ app.post("/api/analyze", async (req, res) => {
     if (err?.status === 401) return res.status(401).json({ error: "Invalid OpenAI API key. Check your .env file." });
     if (err?.status === 429) return res.status(429).json({ error: "OpenAI rate limit reached — please wait a moment and try again." });
     if (err?.status === 400) return res.status(400).json({ error: "Bad request to OpenAI: " + err.message });
-    if (err?.status === 413) return res.status(413).json({ error: "Image is too large. Please reduce the file size and try again." });
+    if (err?.status === 413) return res.status(413).json({ error: "Image(s) too large. Please reduce file size and try again." });
 
     res.status(500).json({ error: err.message || "An unexpected error occurred." });
   }
@@ -227,12 +241,11 @@ app.post("/api/analyze", async (req, res) => {
 
 // ── Start ─────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`\n✅  Scrivly backend running`);
+  console.log(`\n✅  InkParse backend running`);
   console.log(`   http://localhost:${PORT}`);
-  console.log(`   POST /api/analyze  — analyse a notes image`);
+  console.log(`   POST /api/analyze  — analyse 1 or more note images`);
   console.log(`   GET  /health       — health check\n`);
 
-  // Keep-alive ping every 5 min — prevents Render free tier from sleeping
   const RENDER_URL = process.env.RENDER_URL || `http://localhost:${PORT}`;
   setInterval(() => {
     fetch(`${RENDER_URL}/health`)
