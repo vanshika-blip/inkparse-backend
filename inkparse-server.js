@@ -1,17 +1,6 @@
 // ─────────────────────────────────────────────────────────────
-//  BACKEND SERVER  —  server.js
-//  Inkparse API — proxies requests to OpenAI securely
-// ─────────────────────────────────────────────────────────────
-//
-//  SETUP INSTRUCTIONS:
-//  1. npm install express cors openai dotenv
-//  2. Create a .env file in this folder with:
-//       OPENAI_API_KEY=sk-...your-key-here...
-//       PORT=3001
-//  3. node server.js
-//
-//  Your frontend (notes-reader.jsx) should point to:
-//       http://localhost:3001
+//  BACKEND SERVER  —  inkparse-server.js
+//  Scrivly API — proxies requests to OpenAI securely
 // ─────────────────────────────────────────────────────────────
 
 require("dotenv").config();
@@ -32,11 +21,17 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ── Middleware ────────────────────────────────────────────────
 app.use(cors({
-  origin: ["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:5173"],
+  origin: [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://inkparse.vercel.app",   // ← replace with your actual Vercel URL
+    /\.vercel\.app$/                  // allows all Vercel preview URLs too
+  ],
   methods: ["GET","POST"],
   allowedHeaders: ["Content-Type"]
 }));
-app.use(express.json({ limit: "20mb" })); // images can be large
+app.use(express.json({ limit: "20mb" }));
 
 // ── Health check ──────────────────────────────────────────────
 app.get("/health", (_req, res) => {
@@ -44,9 +39,6 @@ app.get("/health", (_req, res) => {
 });
 
 // ── Main endpoint: analyze notes image ───────────────────────
-// POST /api/analyze
-// Body: { imageBase64: string, imageMime: string }
-// Returns: { title, subject, notes, mermaidCode }
 app.post("/api/analyze", async (req, res) => {
   const { imageBase64, imageMime = "image/jpeg" } = req.body;
 
@@ -66,7 +58,7 @@ app.post("/api/analyze", async (req, res) => {
               type: "image_url",
               image_url: {
                 url: `data:${imageMime};base64,${imageBase64}`,
-                detail: "high"   // use high detail for handwriting
+                detail: "high"
               }
             },
             {
@@ -88,7 +80,7 @@ Be complete. Every readable word should appear.
 STEP 3 — FLOWCHART (always required):
 Create a Mermaid flowchart representing the content's logic/structure:
 - Process notes → step-by-step flow with decisions
-- Concept notes → concept map showing relationships  
+- Concept notes → concept map showing relationships
 - Mixed notes → hybrid showing main topics and their flow
 - Always include a meaningful start and end node
 - Make it reflect the ACTUAL content of the notes
@@ -115,7 +107,6 @@ Return ONLY valid JSON, no markdown fences, no extra text:
     const text = response.choices[0]?.message?.content?.trim();
     if (!text) throw new Error("Empty response from OpenAI");
 
-    // Parse JSON from response
     let parsed;
     const jsonMatch = text.match(/```json\s*([\s\S]*?)```/) || text.match(/(\{[\s\S]*\})/);
     if (jsonMatch) {
@@ -128,20 +119,26 @@ Return ONLY valid JSON, no markdown fences, no extra text:
 
   } catch (err) {
     console.error("OpenAI error:", err.message);
-
-    // Handle OpenAI API errors specifically
     if (err?.status === 401) return res.status(401).json({ error: "Invalid OpenAI API key" });
     if (err?.status === 429) return res.status(429).json({ error: "OpenAI rate limit hit — try again shortly" });
     if (err?.status === 400) return res.status(400).json({ error: "Bad request to OpenAI: " + err.message });
-
     res.status(500).json({ error: err.message || "Something went wrong" });
   }
 });
 
 // ── Start ─────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`\n✅  Inkparse backend running`);
+  console.log(`\n✅  Scrivly backend running`);
   console.log(`   http://localhost:${PORT}`);
   console.log(`   POST /api/analyze  — analyze a notes image`);
   console.log(`   GET  /health       — health check\n`);
+
+  // ── Keep-alive: ping every 5 minutes ─────────────────────────
+  // Stops Render free tier from sleeping after inactivity
+  const RENDER_URL = process.env.RENDER_URL || `http://localhost:${PORT}`;
+  setInterval(() => {
+    fetch(`${RENDER_URL}/health`)
+      .then(() => console.log(`🟢 [${new Date().toISOString()}] Keep-alive ping OK`))
+      .catch(() => console.log(`🔴 [${new Date().toISOString()}] Keep-alive ping failed`));
+  }, 5 * 60 * 1000); // 5 minutes
 });
