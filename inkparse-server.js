@@ -91,12 +91,18 @@ STRICT Mermaid rules:
 - Shapes: [step], {decision?}, ([start or end])
 - Max 12 nodes
 
-Return ONLY valid JSON, no markdown fences, no extra text:
+Return ONLY a raw JSON object. Rules:
+- NO markdown fences, NO backticks, NO extra text before or after
+- NO backslashes except inside string values where needed
+- In mermaidCode, separate lines with \n (literal backslash-n)
+- In notes, use plain text — no raw backslashes
+- All quotes inside strings must be escaped with \"
+
 {
   "title": "Descriptive title of the notes",
   "subject": "Subject area",
   "notes": "Complete thorough markdown — everything you can read",
-  "mermaidCode": "flowchart TD\\n  A([Start]) --> B[First step]\\n  B --> C{Decision?}\\n  C -->|Yes| D[Do this]\\n  C -->|No| E[Do that]\\n  D --> F([End])\\n  E --> F"
+  "mermaidCode": "flowchart TD\n  A([Start]) --> B[First step]\n  B --> C{Decision?}\n  C -->|Yes| D[Do this]\n  C -->|No| E[Do that]\n  D --> F([End])\n  E --> F"
 }`
             }
           ]
@@ -108,11 +114,45 @@ Return ONLY valid JSON, no markdown fences, no extra text:
     if (!text) throw new Error("Empty response from OpenAI");
 
     let parsed;
-    const jsonMatch = text.match(/```json\s*([\s\S]*?)```/) || text.match(/(\{[\s\S]*\})/);
-    if (jsonMatch) {
-      parsed = JSON.parse(jsonMatch[1]);
-    } else {
-      parsed = JSON.parse(text);
+    try {
+      // Strip markdown fences if present
+      let clean = text
+        .replace(/^```json\s*/i, "")
+        .replace(/^```\s*/i, "")
+        .replace(/```\s*$/i, "")
+        .trim();
+
+      // Extract JSON object if surrounded by other text
+      const objMatch = clean.match(/(\{[\s\S]*\})/);
+      if (objMatch) clean = objMatch[1];
+
+      // Fix common escape issues — unescaped backslashes in mermaidCode
+      // Parse normally first
+      try {
+        parsed = JSON.parse(clean);
+      } catch (innerErr) {
+        // If normal parse fails, try to fix bad escape sequences
+        // Replace lone backslashes that aren't valid JSON escapes
+        const fixed = clean.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
+        parsed = JSON.parse(fixed);
+      }
+
+      // Sanitize mermaidCode — ensure newlines are actual \n strings
+      if (parsed.mermaidCode) {
+        parsed.mermaidCode = parsed.mermaidCode
+          .replace(/\r\n/g, "\n")
+          .replace(/\r/g, "\n");
+      }
+
+      // Sanitize notes — remove any lone backslashes that could cause issues
+      if (parsed.notes) {
+        parsed.notes = parsed.notes.replace(/\\(?![*_`#])/g, "");
+      }
+
+    } catch (parseErr) {
+      console.error("JSON parse failed:", parseErr.message);
+      console.error("Raw response:", text.slice(0, 500));
+      throw new Error("Could not parse AI response as JSON: " + parseErr.message);
     }
 
     res.json(parsed);
