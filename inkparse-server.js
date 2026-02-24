@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────
-//  ScriptAI Backend Server — server.js
+//  Scribbld Backend Server — server.js
 //  Proxies handwriting analysis requests to OpenAI securely
 // ─────────────────────────────────────────────────────────────
 
