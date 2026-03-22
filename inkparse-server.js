@@ -10,12 +10,10 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 }
 });
 
-app.use(cors());
 
-// With this:
 app.use(cors({
   origin: [
-    "https://scribbld.vercel.app/",
+    "https://scribbld.vercel.app",
     "http://localhost:3000",  // for local dev
     "http://localhost:5173",  // if using Vite
   ]
