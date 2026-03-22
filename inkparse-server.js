@@ -1,429 +1,188 @@
-// ─────────────────────────────────────────────────────────────
-//  Scribbld Backend Server — server.js
-//  Proxies handwriting analysis requests to OpenAI securely
-// ─────────────────────────────────────────────────────────────
+const express = require('express');
+const cors = require('cors');
+const multer = require('multer');
+const OpenAI = require('openai');
+const path = require('path');
 
-require("dotenv").config();
-const express = require("express");
-const cors    = require("cors");
-const OpenAI  = require("openai");
-
-const app  = express();
-const PORT = process.env.PORT || 3001;
-
-// ── Validate API key on startup ───────────────────────────────
-if (!process.env.OPENAI_API_KEY) {
-  console.error("❌  Missing OPENAI_API_KEY in .env file");
-  process.exit(1);
-}
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// ── Middleware ────────────────────────────────────────────────
-app.use(cors({
-  origin: [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-    "https://scribbld.vercel.app",
-    /\.vercel\.app$/,
-    /localhost:\d+$/,
-  ],
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type"],
-  credentials: false,
-}));
-
-app.use(express.json({ limit: "80mb" })); // generous limit for multiple high-res images
-
-// ── Health check ──────────────────────────────────────────────
-app.get("/", (_req, res) => {
-  res.json({ status: "ok", service: "ScriptAI", model: "gpt-4o" });
+const app = express();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 }
 });
 
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok", uptime: process.uptime(), model: "gpt-4o" });
-});
+app.use(cors());
+app.use(express.json({ limit: '15mb' }));
 
-// ── System Prompt ─────────────────────────────────────────────
-const SYSTEM_PROMPT = `You are ScriptAI, a specialist in converting handwritten notes into structured digital documents. You have expert-level skill in reading difficult handwriting — messy, rotated, faded, densely annotated, with arrows, diagrams, and margin notes.
+// ─── Prompts ──────────────────────────────────────────────────────────────────
 
-Your job produces two outputs: (1) faithful well-structured Markdown notes, and (2) a logically sound Mermaid flowchart.
+const FLOWCHART_PROMPT = `You are an expert at reading hand-drawn flowcharts and diagrams. Your job is to produce a perfectly valid Mermaid.js flowchart.
+Analyze the image carefully and follow these rules precisely:
+1. Identify every shape:
+   - Rectangle/Box = process step → use [Label]
+   - Diamond = decision → use {Label}
+   - Oval/Rounded = start or end → use ([Label])
+   - Parallelogram = input/output → use[/Label/]
+2. Identify every arrow and its direction. If there is a label on the arrow (like Yes/No), include it.
+3. Preserve the complete flow and logic exactly as drawn.
+4. Output ONLY valid Mermaid.js code. Start with: flowchart TD
+5. Use short, clean node IDs like A, B, C or meaningful ones like START, DECISION1.
+6. Do NOT include markdown code fences, no backticks, no explanation. Just the raw Mermaid code.
+Example output format:
+flowchart TD
+    A([Start]) --> B[Step One]
+    B --> C{Decision?}
+    C -->|Yes| D[Do This]
+    C -->|No| E[Do That]
+    D --> F([End])
+    E --> F`;
 
-────────────────────────────────────────────
-STEP 1 — READ THE IMAGE(S) THOROUGHLY
-────────────────────────────────────────────
-Before writing anything, perform a thorough reading pass:
+const NOTES_PROMPT = `You are an expert at reading handwritten notes and converting them into clean, well-structured markdown.
+Analyze the image carefully and follow these rules:
+1. Read every word accurately, even messy handwriting.
+2. Identify the structure: headings, subheadings, bullet points, numbered lists, paragraphs.
+3. Preserve all hierarchy — if something was underlined or larger, make it a heading (#, ##, ###).
+4. Maintain all bullet points (use -) and numbered lists.
+5. Fix spelling mistakes and grammar while keeping the original meaning.
+6. If there are multiple sections, separate them with proper markdown headings.
+7. If there are any formulas, equations, or special symbols, preserve them accurately.
+8. Output ONLY clean markdown. No backticks, no code fences, no explanations.
+9. Make it look professional and easy to read.`;
 
-• ORIENTATION: Mentally rotate the image if text is at an angle or upside-down.
-• COVERAGE: Scan every region — main body, margins, corners, sticky annotations, circled/boxed text, underlines, arrows between ideas, crossed-out revisions, embedded diagrams, tables, numbered lists.
-• DISAMBIGUATION: Use surrounding context to resolve unclear letters or words. Only mark something as (unclear) if truly indecipherable after context reasoning.
-• HIERARCHY: Identify what is a title, section heading, sub-point, side note, formula, example, warning, definition, or key term.
-• COMPLETENESS: Every readable word must appear in your output — do not summarise, paraphrase, or omit unless content is completely illegible.
+const DOC_SYSTEM_PROMPT = `You are an expert AI call centre consultant creating professional client-ready HTML documentation for AI calling systems.
+Output ONLY the inner HTML body content. No <html>, <head>, or <body> tags. No markdown fences.
 
-────────────────────────────────────────────
-STEP 2 — MARKDOWN NOTES
-────────────────────────────────────────────
-Format the notes faithfully using these conventions:
+Use these exact pre-defined CSS classes in your output:
+- .client-doc (wrap everything in this div)
+- .doc-hero (header block with children: .d-eyebrow, h1, .d-sub, .d-meta containing .d-meta-item divs each with .d-label and .d-val)
+- .doc-section (each major section — contains .sec-hdr with .sec-num span and h2, plus .sec-body)
+- .stage-card (each call stage — contains .stage-hdr with .stage-label and .stage-name spans, plus .stage-body)
+- .stage-body (two-column grid — two .stage-col divs each with an h4 label)
+- .script-bubble (each script line / spoken text)
+- .outcome-chip for positive outcomes, .outcome-chip.red for negative, .outcome-chip.yellow for pending
+- <table class="eval-table"> with <th> and <td> (3 columns: Criterion, Weight, Description)
+- .score-pill.high / .score-pill.med / .score-pill.low (inline score indicators)
+- .info-grid containing .info-item divs (each with .i-label and .i-val)
+- .flow-vis (visual flow row) containing .flow-node spans, .flow-node.end-node for final node, .flow-arr spans (use →)
 
-# Title          — the main document title  
-## Section       — major topic changes  
-// ─────────────────────────────────────────────────────────────
-//  Scribbld Backend Server — server.js
-//  Handles handwriting analysis AND prompt-to-document generation
-// ─────────────────────────────────────────────────────────────
+Create ALL of these sections as .doc-section blocks:
+1. Executive Overview — purpose, scope, target audience, expected outcomes
+2. Call Flow Architecture — .flow-vis nodes showing the full path, then a summary table
+3. Stage-by-Stage Scripts — one .stage-card per stage, left col = script bubbles, right col = decision outcomes
+4. Objection Handling & Edge Cases — common objections with recommended responses
+5. Quality Evaluation Framework — eval-table with all criteria, weights, scoring guide, pass/fail threshold
+6. Performance KPIs & Benchmarks — info-grid with key metrics and targets
+7. Implementation Notes & Best Practices — technical and operational guidance
 
-require("dotenv").config();
-const express = require("express");
-const cors    = require("cors");
-const OpenAI  = require("openai");
+Be VERY detailed and specific. Extract every stage, every decision point, every script line, and every evaluation criterion from the prompts provided. This should look like a premium consultant deliverable.`;
 
-const app  = express();
-const PORT = process.env.PORT || 3001;
+// ─── Route 1: Image → Flowchart or Notes ─────────────────────────────────────
 
-if (!process.env.OPENAI_API_KEY) {
-  console.error("❌  Missing OPENAI_API_KEY in .env file");
-  process.exit(1);
-}
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// ── Middleware ────────────────────────────────────────────────
-app.use(cors({
-  origin: [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-    "https://scribbld.vercel.app",
-    /\.vercel\.app$/,
-    /localhost:\d+$/,
-  ],
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type"],
-  credentials: false,
-}));
-
-app.use(express.json({ limit: "80mb" }));
-
-// ── Health ────────────────────────────────────────────────────
-app.get("/", (_req, res) => res.json({ status: "ok", service: "Scribbld", model: "gpt-4o" }));
-app.get("/health", (_req, res) => res.json({ status: "ok", uptime: process.uptime() }));
-
-// ════════════════════════════════════════════════════════════════
-//  ENDPOINT 1 — POST /api/analyze  (handwriting OCR — unchanged)
-// ════════════════════════════════════════════════════════════════
-const ANALYZE_SYSTEM = `You are ScriptAI, a specialist in converting handwritten notes into structured digital documents. You have expert-level skill in reading difficult handwriting — messy, rotated, faded, densely annotated, with arrows, diagrams, and margin notes.
-
-Your job produces two outputs: (1) faithful well-structured Markdown notes, and (2) a logically sound Mermaid flowchart.
-
-────────────────────────────────────────────
-STEP 1 — READ THE IMAGE(S) THOROUGHLY
-────────────────────────────────────────────
-Before writing anything, perform a thorough reading pass:
-
-• ORIENTATION: Mentally rotate the image if text is at an angle or upside-down.
-• COVERAGE: Scan every region — main body, margins, corners, sticky annotations, circled/boxed text, underlines, arrows between ideas, crossed-out revisions, embedded diagrams, tables, numbered lists.
-• DISAMBIGUATION: Use surrounding context to resolve unclear letters or words. Only mark something as (unclear) if truly indecipherable after context reasoning.
-• HIERARCHY: Identify what is a title, section heading, sub-point, side note, formula, example, warning, definition, or key term.
-• COMPLETENESS: Every readable word must appear in your output — do not summarise, paraphrase, or omit unless content is completely illegible.
-
-────────────────────────────────────────────
-STEP 2 — MARKDOWN NOTES
-────────────────────────────────────────────
-Format the notes faithfully using these conventions:
-
-# Title          — the main document title  
-## Section       — major topic changes  
-### Sub-section  — sub-topics within a section  
-**term**         — key terms, important phrases, defined vocabulary  
-*emphasis*       — author stress, warnings (underlined words in original)  
-\`formula\`      — equations, code, chemical notation, technical expressions  
-- bullet         — unordered list items  
-1. step          — numbered/ordered steps or procedures  
----              — visual divider between clearly distinct sections  
-> margin note    — side notes and annotations  
-
-QUALITY RULES:
-- Preserve the author's original order and grouping exactly.
-- Represent tables and ASCII diagrams as best you can in Markdown.
-- Margin annotations belong near the section they annotate, as > blockquotes.
-- Do NOT add information not in the image.
-- Do NOT rewrite or paraphrase — transcribe exactly what is written.
-- If multiple images are provided, treat them as sequential pages of the same document.
-
-────────────────────────────────────────────
-STEP 3 — MERMAID FLOWCHART
-────────────────────────────────────────────
-Generate a Mermaid flowchart that captures the LOGICAL STRUCTURE or PROCESS across all images.
-
-STRICT SYNTAX RULES:
-✓ First line MUST be exactly: flowchart TD
-✓ Node IDs: alphanumeric only (A, B1, Step3, NodeA)
-✓ Node labels: plain words only, max 6 words, NO special characters
-✓ Shapes: [process], {decision?}, ([start/end terminal])
-✓ Arrows: --> for plain, -->|label| for labelled (label max 3 words, no special chars)
-✗ NEVER use: quotes, colons, equals signs, brackets inside brackets, semicolons, HTML tags inside labels
-✓ 6–12 nodes ideal. Never fewer than 4, never more than 14.
-✓ Every node must be reachable from the start node.
-
-────────────────────────────────────────────
-OUTPUT FORMAT — STRICT JSON ONLY
-────────────────────────────────────────────
-Return ONLY a raw JSON object. No text before or after. No markdown fences. No backticks.
-
-{
-  "title": "Short descriptive title (5–8 words max)",
-  "subject": "Subject or domain of the notes",
-  "notes": "Full markdown — every readable word from the image(s)",
-  "mermaidCode": "flowchart TD\\n  A([Start]) --> B[First Step]\\n  ..."
-}
-
-IMPORTANT FORMATTING:
-- In mermaidCode: actual newlines must be encoded as \\n (backslash + n as a literal escape)
-- In notes: use real newlines
-- Escape all double-quote characters inside string values with \\"
-- Validate that your JSON is parseable before returning it`;
-
-function buildVisionContent(imageList) {
-  const blocks = [];
-  imageList.forEach(({ imageBase64, imageMime = "image/jpeg" }, i) => {
-    if (imageList.length > 1) blocks.push({ type: "text", text: `--- Page ${i + 1} of ${imageList.length} ---` });
-    blocks.push({ type: "image_url", image_url: { url: `data:${imageMime};base64,${imageBase64}`, detail: "high" } });
-  });
-  blocks.push({ type: "text", text: imageList.length > 1
-    ? `Please analyse all ${imageList.length} handwritten note images above as sequential pages. Combine them into one coherent set of notes. Return only the JSON object.`
-    : `Please analyse this handwritten notes image and return the JSON object. Be thorough — capture every readable word.` });
-  return blocks;
-}
-
-app.post("/api/analyze", async (req, res) => {
-  const { imageBase64, imageMime, images } = req.body;
-  let imageList = [];
-  if (images && Array.isArray(images) && images.length > 0) {
-    imageList = images;
-    if (imageList.find(img => !img.imageBase64)) return res.status(400).json({ error: "Each image entry must include imageBase64." });
-  } else if (imageBase64) {
-    imageList = [{ imageBase64, imageMime: imageMime || "image/jpeg" }];
-  } else {
-    return res.status(400).json({ error: "Missing imageBase64 or images array." });
-  }
-  if (imageList.length > 10) return res.status(400).json({ error: "Maximum 10 images per request." });
-
-  console.log(`📸 [${new Date().toISOString()}] Analysing ${imageList.length} image(s)…`);
+app.post('/api/analyze', upload.single('image'), async (req, res) => {
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o", max_tokens: 4096, temperature: 0.15,
-      messages: [{ role: "system", content: ANALYZE_SYSTEM }, { role: "user", content: buildVisionContent(imageList) }],
-    });
-    const rawText = response.choices[0]?.message?.content?.trim();
-    if (!rawText) throw new Error("Empty response from OpenAI.");
-    let parsed;
-    try {
-      let clean = rawText.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
-      const objMatch = clean.match(/(\{[\s\S]*\})/);
-      if (objMatch) clean = objMatch[1];
-      try { parsed = JSON.parse(clean); } catch {
-        parsed = JSON.parse(clean.replace(/\\(?!["\\/bfnrtu])/g, "\\\\"));
-      }
-    } catch (parseErr) { throw new Error("Could not parse AI response: " + parseErr.message); }
-    if (parsed.mermaidCode) parsed.mermaidCode = parsed.mermaidCode.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    if (!parsed.title) parsed.title = "Handwritten Notes";
-    if (!parsed.subject) parsed.subject = "General";
-    console.log(`✅ Analyze success: "${parsed.title}"`);
-    res.json(parsed);
-  } catch (err) {
-    console.error("❌ Error:", err.message);
-    if (err?.status === 401) return res.status(401).json({ error: "Invalid OpenAI API key." });
-    if (err?.status === 429) return res.status(429).json({ error: "Rate limit reached — wait and retry." });
-    res.status(500).json({ error: err.message || "Unexpected error." });
-  }
-});
+    const { type } = req.body;
 
-// ════════════════════════════════════════════════════════════════
-//  ENDPOINT 2 — POST /api/generate-doc  (prompt → document)
-// ════════════════════════════════════════════════════════════════
-const DOC_SYSTEM = `You are an expert technical writer and AI product analyst. Your job is to read one or more AI agent system prompts (call prompts, eval prompts, or both) and produce a comprehensive, professional, customer-facing document that explains what this AI agent does, how it works, and how to understand its behaviour.
-
-The output will be shared with clients, stakeholders, and customers — so it must be polished, clear, and complete.
-
-────────────────────────────────────────────
-WHAT YOU MUST DO
-────────────────────────────────────────────
-
-1. Read the entire prompt(s) carefully before writing anything.
-2. Identify: the agent's identity, purpose, audience, key rules, conversation flow, language style, error handling, special states, and any evaluation criteria.
-3. Write a full document with clear sections — no fluff, no vague descriptions, just concrete accurate information extracted directly from the prompt.
-4. Generate a Mermaid flowchart of the main conversation/call flow.
-5. Return everything as a single JSON object.
-
-────────────────────────────────────────────
-SECTION GUIDANCE
-────────────────────────────────────────────
-
-Always include these sections if applicable:
-- "Overview" — what this agent does, who it talks to, and what it's trying to achieve
-- "Agent Identity & Persona" — name, role, gender, language, tone, personality
-- "Primary Objective" — the main goal/conversion target
-- "Call Flow / Process Steps" — step-by-step conversation phases with clear descriptions
-- "Key Rules & Behaviours" — hard rules, prohibitions, decision logic
-- "Language & Communication Style" — language used, tone guidelines, forbidden phrases
-- "Objection Handling" — how objections are handled, scripts used
-- "Special States" — silence handling, disconnections, voicemail, busy callbacks
-- "Evaluation Criteria" (only if eval prompt provided) — what metrics are tracked, how success is measured
-- "Variables & Data Collected" — what user data is captured and why
-- "Integration & Technical Notes" — any technical details about the system
-
-Skip sections that are genuinely not applicable. Add extra sections if the prompt has significant content not covered above.
-
-────────────────────────────────────────────
-MERMAID FLOWCHART RULES
-────────────────────────────────────────────
-
-Generate a flowchart of the main conversation flow:
-✓ First line MUST be exactly: flowchart TD
-✓ Node IDs: alphanumeric only (A, B1, Step3)
-✓ Node labels: plain words only, max 6 words, NO special characters (no quotes, colons, equals, brackets-in-brackets)
-✓ Use: [process step], {decision?}, ([start/end])
-✓ Arrows: --> or -->|short label|
-✓ 8–14 nodes ideal
-✓ Every node reachable from start
-✗ NEVER use quotes, colons, HTML, or special characters inside node labels
-
-────────────────────────────────────────────
-OUTPUT FORMAT — STRICT JSON ONLY
-────────────────────────────────────────────
-
-Return ONLY a raw JSON object. No markdown fences. No backticks. No commentary before or after.
-
-{
-  "title": "Concise document title (e.g. 'WeightWise AI Call Agent — System Overview')",
-  "subtitle": "One sentence describing the agent and its purpose",
-  "agentName": "The agent's name if specified",
-  "company": "The company/brand if specified",
-  "primaryGoal": "One-sentence description of the primary conversion or outcome goal",
-  "tags": ["tag1", "tag2", "tag3"],
-  "keyHighlights": [
-    "Short bullet highlight 1",
-    "Short bullet highlight 2",
-    "Short bullet highlight 3",
-    "Short bullet highlight 4"
-  ],
-  "sections": [
-    {
-      "id": "unique_snake_case_id",
-      "heading": "Section Heading",
-      "icon": "single emoji",
-      "content": "Full markdown content for this section. Use ## subheadings, **bold**, bullet lists as appropriate. Be thorough and specific — copy exact details from the prompt. This should be a detailed, useful section.",
-      "type": "prose"
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No image uploaded' });
     }
-  ],
-  "callFlowMermaid": "flowchart TD\\n  A([Call Starts]) --> B[Greeting]\\n  ..."
-}
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ success: false, error: 'OpenAI API key not configured' });
+    }
 
-IMPORTANT:
-- sections must be a real array of objects, not a string
-- In callFlowMermaid: encode newlines as \\n (literal backslash-n)
-- In section content: use real newlines
-- Escape double-quotes inside strings with \\"
-- keyHighlights: 4–6 short punchy bullet strings
-- tags: 3–6 short topic tags
-- Be comprehensive — each section content should be 100–400 words with real detail from the prompt`;
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const base64Image = req.file.buffer.toString('base64');
+    const mimeType = req.file.mimetype;
+    const prompt = type === 'flowchart' ? FLOWCHART_PROMPT : NOTES_PROMPT;
 
-app.post("/api/generate-doc", async (req, res) => {
-  const { callPrompt, evalPrompt } = req.body;
-
-  if (!callPrompt && !evalPrompt) {
-    return res.status(400).json({ error: "Provide at least one of: callPrompt, evalPrompt." });
-  }
-
-  let userMessage = "";
-  if (callPrompt && evalPrompt) {
-    userMessage = `I am providing TWO prompts for the same AI agent system.\n\n---\n## CALL PROMPT (System Prompt)\n\n${callPrompt}\n\n---\n## EVAL PROMPT (Evaluation Prompt)\n\n${evalPrompt}\n\n---\n\nPlease generate a comprehensive customer-facing document covering both prompts. Include an "Evaluation Criteria" section based on the eval prompt. Return only the JSON object.`;
-  } else if (callPrompt) {
-    userMessage = `Here is the AI agent system prompt (call prompt):\n\n${callPrompt}\n\nPlease generate a comprehensive customer-facing document. Return only the JSON object.`;
-  } else {
-    userMessage = `Here is the AI agent evaluation prompt:\n\n${evalPrompt}\n\nPlease generate a comprehensive document covering the evaluation criteria and what this agent is being measured against. Return only the JSON object.`;
-  }
-
-  console.log(`📄 [${new Date().toISOString()}] Generating doc from prompt(s) — call:${!!callPrompt}, eval:${!!evalPrompt}`);
-
-  try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: 'gpt-4o',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          {
+            type: 'image_url',
+            image_url: {
+              url: `data:${mimeType};base64,${base64Image}`,
+              detail: 'high'
+            }
+          }
+        ]
+      }],
+      max_tokens: 4096,
+      temperature: 0.1,
+    });
+
+    let content = response.choices[0].message.content.trim();
+    content = content.replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '').trim();
+
+    res.json({ success: true, content, type });
+
+  } catch (error) {
+    console.error('Analyze error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─── Route 2: Prompts → Client Document ──────────────────────────────────────
+
+app.post('/api/generate-doc', async (req, res) => {
+  try {
+    const { scriptPrompt, evalPrompt, client, product, version } = req.body;
+
+    if (!scriptPrompt && !evalPrompt) {
+      return res.status(400).json({ success: false, error: 'Provide at least one prompt (script or evaluation)' });
+    }
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ success: false, error: 'OpenAI API key not configured' });
+    }
+
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+    const userText = `Generate a full, detailed, professional AI calling system documentation.
+
+${client  ? `Client Name: ${client}`    : ''}
+${product ? `Product / Use Case: ${product}` : ''}
+Version: ${version || 'v1.0'}
+Date: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}
+
+${scriptPrompt ? `=== CALL SCRIPT PROMPT ===\n${scriptPrompt}` : ''}
+${evalPrompt   ? `\n=== CALL EVALUATION PROMPT ===\n${evalPrompt}` : ''}
+
+Create a complete, detailed document covering all stages, scripts, evaluation criteria, and implementation guidance.`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: DOC_SYSTEM_PROMPT },
+        { role: 'user',   content: userText }
+      ],
       max_tokens: 4096,
       temperature: 0.2,
-      messages: [
-        { role: "system", content: DOC_SYSTEM },
-        { role: "user", content: userMessage },
-      ],
     });
 
-    const rawText = response.choices[0]?.message?.content?.trim();
-    if (!rawText) throw new Error("Empty response from OpenAI.");
+    let content = response.choices[0].message.content.trim();
+    content = content.replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '').trim();
 
-    let parsed;
-    try {
-      let clean = rawText
-        .replace(/^```json\s*/i, "")
-        .replace(/^```\s*/i, "")
-        .replace(/```\s*$/i, "")
-        .trim();
-      const objMatch = clean.match(/(\{[\s\S]*\})/s);
-      if (objMatch) clean = objMatch[1];
-      try { parsed = JSON.parse(clean); } catch {
-        parsed = JSON.parse(clean.replace(/\\(?!["\\/bfnrtu])/g, "\\\\"));
-      }
-    } catch (parseErr) {
-      console.error("❌ JSON parse failed:", parseErr.message);
-      console.error("Raw (first 600):", rawText.slice(0, 600));
-      throw new Error("Could not parse AI response: " + parseErr.message);
-    }
+    res.json({ success: true, content });
 
-    // Sanitize
-    if (!parsed.title) parsed.title = "AI Agent Documentation";
-    if (!parsed.subtitle) parsed.subtitle = "System overview and behaviour guide";
-    if (!parsed.sections) parsed.sections = [];
-    if (!parsed.keyHighlights) parsed.keyHighlights = [];
-    if (!parsed.tags) parsed.tags = [];
-    if (parsed.callFlowMermaid) {
-      parsed.callFlowMermaid = parsed.callFlowMermaid
-        .replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    }
-
-    console.log(`✅ Doc generated: "${parsed.title}" (${parsed.sections.length} sections)`);
-    res.json(parsed);
-
-  } catch (err) {
-    console.error("❌ Error:", err.message);
-    if (err?.status === 401) return res.status(401).json({ error: "Invalid OpenAI API key." });
-    if (err?.status === 429) return res.status(429).json({ error: "Rate limit reached — wait and retry." });
-    if (err?.status === 413) return res.status(413).json({ error: "Prompt too large." });
-    res.status(500).json({ error: err.message || "Unexpected error." });
+  } catch (error) {
+    console.error('Doc generation error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// ── 404 ───────────────────────────────────────────────────────
-app.use((_req, res) => res.status(404).json({ error: "Not found." }));
+// ─── Health check ─────────────────────────────────────────────────────────────
 
-// ── Start ─────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  const url = process.env.RENDER_URL || `http://localhost:${PORT}`;
-  console.log(`\n✅  Scribbld backend running`);
-  console.log(`   ${url}`);
-  console.log(`   POST /api/analyze      — handwriting OCR`);
-  console.log(`   POST /api/generate-doc — prompt to document\n`);
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
-  const KEEP_ALIVE_URL = process.env.RENDER_URL;
-  if (KEEP_ALIVE_URL) {
-    setInterval(async () => {
-      try {
-        await fetch(`${KEEP_ALIVE_URL}/health`);
-        console.log(`🟢 [${new Date().toISOString()}] Keep-alive OK`);
-      } catch {
-        console.log(`🔴 [${new Date().toISOString()}] Keep-alive failed`);
-      }
-    }, 4 * 60 * 1000);
-  }
+// ─── Serve React build (if hosting frontend from same server) ─────────────────
+
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
+
+// ─── Start ────────────────────────────────────────────────────────────────────
+
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
