@@ -183,12 +183,6 @@ Create a complete, detailed document covering all stages, scripts, evaluation cr
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
-// ─── Serve React build (if hosting frontend from same server) ─────────────────
-
-app.use(express.static(path.join(__dirname, 'public')));
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
