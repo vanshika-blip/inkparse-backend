@@ -11,7 +11,15 @@ const upload = multer({
 });
 
 app.use(cors());
-app.use(express.json({ limit: '15mb' }));
+
+// With this:
+app.use(cors({
+  origin: [
+    "https://scribbld.vercel.app/",
+    "http://localhost:3000",  // for local dev
+    "http://localhost:5173",  // if using Vite
+  ]
+}));app.use(express.json({ limit: '15mb' }));
 
 // ─── Prompts ──────────────────────────────────────────────────────────────────
 
