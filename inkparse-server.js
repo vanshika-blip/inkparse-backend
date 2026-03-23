@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const OpenAI = require('openai');
-const path = require('path');
 
 const app = express();
 const upload = multer({
@@ -55,32 +54,97 @@ Analyze the image carefully and follow these rules:
 8. Output ONLY clean markdown. No backticks, no code fences, no explanations.
 9. Make it look professional and easy to read.`;
 
-const DOC_SYSTEM_PROMPT = `You are an expert AI call centre consultant creating professional client-ready HTML documentation for AI calling systems.
-Output ONLY the inner HTML body content. No <html>, <head>, or <body> tags. No markdown fences.
+// ─── Doc generation system prompt ─────────────────────────────────────────────
 
-Use these exact pre-defined CSS classes in your output:
-- .client-doc (wrap everything in this div)
-- .doc-hero (header block with children: .d-eyebrow, h1, .d-sub, .d-meta containing .d-meta-item divs each with .d-label and .d-val)
-- .doc-section (each major section — contains .sec-hdr with .sec-num span and h2, plus .sec-body)
-- .stage-card (each call stage — contains .stage-hdr with .stage-label and .stage-name spans, plus .stage-body)
-- .stage-body (two-column grid — two .stage-col divs each with an h4 label)
-- .script-bubble (each script line / spoken text)
-- .outcome-chip for positive outcomes, .outcome-chip.red for negative, .outcome-chip.yellow for pending
-- <table class="eval-table"> with <th> and <td> (3 columns: Criterion, Weight, Description)
-- .score-pill.high / .score-pill.med / .score-pill.low (inline score indicators)
-- .info-grid containing .info-item divs (each with .i-label and .i-val)
-- .flow-vis (visual flow row) containing .flow-node spans, .flow-node.end-node for final node, .flow-arr spans (use →)
+const DOC_SYSTEM_PROMPT = `You are a senior AI systems consultant who creates premium, print-ready HTML documentation for AI-powered call centre systems.
 
-Create ALL of these sections as .doc-section blocks:
-1. Executive Overview — purpose, scope, target audience, expected outcomes
-2. Call Flow Architecture — .flow-vis nodes showing the full path, then a summary table
-3. Stage-by-Stage Scripts — one .stage-card per stage, left col = script bubbles, right col = decision outcomes
-4. Objection Handling & Edge Cases — common objections with recommended responses
-5. Quality Evaluation Framework — eval-table with all criteria, weights, scoring guide, pass/fail threshold
-6. Performance KPIs & Benchmarks — info-grid with key metrics and targets
-7. Implementation Notes & Best Practices — technical and operational guidance
+OUTPUT RULES — FOLLOW EXACTLY:
+1. Output a COMPLETE, self-contained HTML file starting with <!DOCTYPE html>.
+2. ALL CSS must be embedded inside a <style> block in <head>. No external stylesheets except Google Fonts.
+3. No markdown. No code fences. No explanation outside the HTML. Output ONLY the HTML file.
+4. The document must be dense and information-rich — designed to look like a premium consultant deliverable.
+5. Import Inter font from Google Fonts.
+6. Embed a print stylesheet: @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } .no-print { display: none !important; } }
 
-Be VERY detailed and specific. Extract every stage, every decision point, every script line, and every evaluation criterion from the prompts provided. This should look like a premium consultant deliverable.`;
+DESIGN SYSTEM — USE EXACTLY:
+  --primary: #0D2B4E
+  --accent: #007A7A
+  --highlight: #C9882A
+  --danger: #C0392B
+  --success: #1A7A4A
+  --bg: #F4F7FA
+  --bg-primary: #EBF0F7
+  --bg-accent: #E6F4F1
+  --bg-highlight: #FEF5E7
+  --text: #374151
+  --muted: #6B7280
+  --border: #D0D7E0
+  --white: #FFFFFF
+
+font-family: Inter, system-ui, sans-serif
+Page: max-width 1080px, margin 0 auto, padding 28px 32px, background white
+Base font: 9px for dense table/card content, 11-12px for body paragraphs
+
+DOCUMENT STRUCTURE:
+
+PAGE 1 — CALL AGENT (if script prompt provided):
+
+1. COVER HEADER
+   - Three-segment color bar at very top (primary 60% | accent 25% | highlight 15%)
+   - System + agent name (large, bold)
+   - Subtitle: extracted purpose one-liner
+   - Stat badge pills: step count, language, persona, primary goal
+   - 3px solid primary bottom border
+
+2. TWO-COLUMN BODY (220px left | 1fr right, gap 14px)
+   LEFT: 3-4 info cards (border-left: 3px accent, bg-primary bg):
+     • Agent Identity card: name, gender, language rules, tone
+     • Decision Logic card: conditions → outcome table (full HTML table with thead)
+     • Pitch Structure card: blocks/phases + content
+     • Variables card: two-col grid of all variable names in teal
+
+   RIGHT: CALL FLOW — one flex row per step:
+     [Num pill 26px, navy/teal alternating] [Body: name bold + objective, flex-1] [Data 100px, teal] [Arrow 28px, gold bg]
+     6px connector between rows (1px line from left)
+     Decision/pitch steps: gold highlight body bg
+     Terminal step: danger bg
+     ALL steps must appear (don't skip any)
+
+3. HANDLERS GRID — 4 cols, one card each (primary / accent / highlight / danger bg):
+   handler name | trigger | action
+
+4. RULES STRIP — 5-6 inline chips:
+   NEVER → danger color | ALWAYS → success color
+
+PAGE 2 — EVALUATION AI (if eval prompt provided):
+
+5. EVAL HEADER — same style as Page 1 header
+
+6. EVAL FLOW DIAGRAM — horizontal nodes:
+   [Input] › [Duration Check] › [branches] › [Extract] › [Score] › [Scans] › [JSON Out]
+   Node: colored rounded box + sublabel. Branch: two bullets (red short / green full).
+   Beside it: quality score rubric table + lead classification chips
+
+7. SPECIAL DETECTION BANNER (if any) — dark full-width band with category chips + escalation action
+
+8. OUTPUT GROUPS GRID — one card per JSON group:
+   Colored header (group # + name) | Body: key fields + types | Footer: one-line purpose
+
+9. BOTTOM 3-CARD ROW:
+   • Core Extraction Rules (numbered)
+   • Objection/Issue Categories (numbered, most common ★ first)
+   • Downstream Use: CRM / QA / Coaching / Escalation
+
+10. VIOLATION STRIP — 6 chips: VIOLATION (danger) | REQUIRED (success) | CRITICAL (highlight)
+
+FOOTER (both pages): system name · confidential · page number hint
+
+EXTRACTION RULES:
+- Extract EVERY step, variable, handler, branch, rule from the agent prompt — nothing omitted
+- Extract EVERY output field, scoring band, violation flag from the eval prompt
+- Use actual agent name, brand, language in all content
+- Never use placeholder text — every word comes from the source prompts
+- If only one prompt provided, generate only the relevant page`;
 
 // ─── Route 1: Image → Flowchart or Notes ─────────────────────────────────────
 
@@ -88,12 +152,8 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
   try {
     const { type } = req.body;
 
-    if (!req.file) {
-      return res.status(400).json({ success: false, error: 'No image uploaded' });
-    }
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ success: false, error: 'OpenAI API key not configured' });
-    }
+    if (!req.file) return res.status(400).json({ success: false, error: 'No image uploaded' });
+    if (!process.env.OPENAI_API_KEY) return res.status(500).json({ success: false, error: 'OpenAI API key not configured' });
 
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const base64Image = req.file.buffer.toString('base64');
@@ -106,13 +166,7 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
         role: 'user',
         content: [
           { type: 'text', text: prompt },
-          {
-            type: 'image_url',
-            image_url: {
-              url: `data:${mimeType};base64,${base64Image}`,
-              detail: 'high'
-            }
-          }
+          { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Image}`, detail: 'high' } }
         ]
       }],
       max_tokens: 4096,
@@ -121,7 +175,6 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
 
     let content = response.choices[0].message.content.trim();
     content = content.replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '').trim();
-
     res.json({ success: true, content, type });
 
   } catch (error) {
@@ -145,17 +198,17 @@ app.post('/api/generate-doc', async (req, res) => {
 
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    const userText = `Generate a full, detailed, professional AI calling system documentation.
+    const userText = `Generate a complete, self-contained HTML documentation file for this AI calling system.
 
 ${client  ? `Client Name: ${client}`         : ''}
 ${product ? `Product / Use Case: ${product}` : ''}
 Version: ${version || 'v1.0'}
 Date: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}
 
-${scriptPrompt ? `=== CALL SCRIPT PROMPT ===\n${scriptPrompt}` : ''}
+${scriptPrompt ? `=== CALL SCRIPT / AGENT PROMPT ===\n${scriptPrompt}` : ''}
 ${evalPrompt   ? `\n=== CALL EVALUATION PROMPT ===\n${evalPrompt}` : ''}
 
-Create a complete, detailed document covering all stages, scripts, evaluation criteria, and implementation guidance.`;
+Output a COMPLETE HTML file starting with <!DOCTYPE html>. Embed all CSS in <head>. Be exhaustive — extract every step, variable, handler, rule, evaluation field from the prompts above.`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
