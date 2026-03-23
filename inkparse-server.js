@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const OpenAI = require('openai');
+const puppeteer = require('puppeteer');
 
 const app = express();
 const upload = multer({
@@ -381,6 +382,69 @@ CRITICAL REQUIREMENTS:
 
   } catch (error) {
     console.error('Doc generation error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─── Route 3: HTML → PDF via Puppeteer ───────────────────────────────────────
+
+app.post('/api/html-to-pdf', async (req, res) => {
+  let browser;
+  try {
+    const { html, filename } = req.body;
+    if (!html) return res.status(400).json({ success: false, error: 'No HTML provided' });
+
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+      ],
+    });
+
+    const page = await browser.newPage();
+
+    // Set content and wait for fonts + layout to settle
+    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
+
+    // Inject print-colour CSS so background colours are preserved
+    await page.addStyleTag({
+      content: `
+        * {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          color-adjust: exact !important;
+        }
+      `,
+    });
+
+    // Wait a tick for any @import fonts to settle
+    await page.waitForTimeout(800);
+
+    const pdfBuffer = await page.pdf({
+      format: 'A4',
+      printBackground: true,       // ← renders all background colours/images
+      margin: { top: '10mm', bottom: '10mm', left: '8mm', right: '8mm' },
+      preferCSSPageSize: false,
+    });
+
+    await browser.close();
+    browser = null;
+
+    const safeFilename = (filename || 'AI_Call_Documentation').replace(/[^a-zA-Z0-9_\-]/g, '_') + '.pdf';
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${safeFilename}"`,
+      'Content-Length': pdfBuffer.length,
+    });
+    res.send(pdfBuffer);
+
+  } catch (error) {
+    if (browser) await browser.close().catch(() => {});
+    console.error('PDF generation error:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
