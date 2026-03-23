@@ -10,14 +10,15 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 }
 });
 
-
 app.use(cors({
   origin: [
     "https://scribbld.vercel.app",
-    "http://localhost:3000",  // for local dev
-    "http://localhost:5173",  // if using Vite
+    "http://localhost:3000",
+    "http://localhost:5173",
   ]
-}));app.use(express.json({ limit: '15mb' }));
+}));
+
+app.use(express.json({ limit: '15mb' }));
 
 // ─── Prompts ──────────────────────────────────────────────────────────────────
 
@@ -146,7 +147,7 @@ app.post('/api/generate-doc', async (req, res) => {
 
     const userText = `Generate a full, detailed, professional AI calling system documentation.
 
-${client  ? `Client Name: ${client}`    : ''}
+${client  ? `Client Name: ${client}`         : ''}
 ${product ? `Product / Use Case: ${product}` : ''}
 Version: ${version || 'v1.0'}
 Date: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}
@@ -162,7 +163,7 @@ Create a complete, detailed document covering all stages, scripts, evaluation cr
         { role: 'system', content: DOC_SYSTEM_PROMPT },
         { role: 'user',   content: userText }
       ],
-      max_tokens: 4096,
+      max_tokens: 16000,
       temperature: 0.2,
     });
 
@@ -180,7 +181,6 @@ Create a complete, detailed document covering all stages, scripts, evaluation cr
 // ─── Health check ─────────────────────────────────────────────────────────────
 
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
-
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
