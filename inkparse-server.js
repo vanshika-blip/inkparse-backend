@@ -289,7 +289,30 @@ EXTRACTION RULES — NEVER VIOLATE
 • Use the ACTUAL agent name, brand, language throughout — never "Agent Name" placeholders
 • Every word of content comes from the source prompts — no invention
 • If only one prompt is provided, generate only the relevant page
-• If both prompts are provided, generate BOTH pages in sequence in the same HTML file`;
+• If both prompts are provided, generate BOTH pages in sequence in the same HTML file
+
+═══════════════════════════════════════════════════
+SPACE UTILISATION — ALWAYS FILL THE PAGE
+═══════════════════════════════════════════════════
+The document must ALWAYS fill an A4 page fully. Never leave large empty white areas.
+
+IF the script has fewer than 6 steps:
+• Expand each step row to be taller (padding: 10px 7px instead of 5px 7px)
+• Add a "SCRIPT EXCERPT" card in the left column showing the actual sample dialogue for key steps
+• Add a "BRANCHING LOGIC" card listing every branch/condition with outcomes
+• Add a "CALL TIPS" card with 4–5 coaching notes inferred from the prompt style and goal
+
+IF the eval prompt is short or has fewer than 6 output groups:
+• Expand each group card to show more field detail
+• Add a "SCORING EXAMPLES" section: 3 rows of example scores (score | call scenario | why that score)
+• Add a "COMMON FAILURE MODES" card listing the 4 most common quality issues for this type of call
+
+IF only one prompt is provided and the page is less than ~90% full:
+• Add an "IMPLEMENTATION NOTES" section: deployment checklist (5–6 items), integration requirements, testing approach
+• Add a "QUICK REFERENCE" strip at the bottom: the 5 most important do's and don'ts for this specific agent
+
+GENERAL DENSITY RULE: every section should have enough content that a reader would spend 30+ seconds reading it. Short cards should have 4+ dot rows. Tables should have 4+ rows. Never render a card with only 1–2 lines of content.`;
+
 
 // ─── Route 1: Image → Flowchart or Notes ─────────────────────────────────────
 
@@ -358,7 +381,8 @@ CRITICAL REQUIREMENTS:
 - Use ALL the coloured component patterns from the design system
 - Every section must have colour: coloured card headers, coloured borders, coloured badges
 - Extract and render EVERY step, variable, handler, rule, field from the prompts above
-- Be exhaustive and dense — this is a premium consultant document`;
+- FILL THE PAGE: if the prompt is short, expand content with script excerpts, branching logic, coaching tips, implementation notes — never leave white space
+- Dense, information-rich — minimum 1 full A4 page per prompt provided`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
