@@ -2,7 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const OpenAI = require('openai');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
+const chromium  = require('@sparticuz/chromium');
 
 const app = express();
 const upload = multer({
@@ -395,13 +396,10 @@ app.post('/api/html-to-pdf', async (req, res) => {
     if (!html) return res.status(400).json({ success: false, error: 'No HTML provided' });
 
     browser = await puppeteer.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-      ],
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
 
     const page = await browser.newPage();
@@ -420,8 +418,8 @@ app.post('/api/html-to-pdf', async (req, res) => {
       `,
     });
 
-    // Wait a tick for any @import fonts to settle
-    await page.waitForTimeout(800);
+    // Wait for @import fonts to settle
+    await new Promise(r => setTimeout(r, 800));
 
     const pdfBuffer = await page.pdf({
       format: 'A4',
