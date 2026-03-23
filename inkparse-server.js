@@ -353,7 +353,118 @@ app.post('/api/analyze', upload.single('image'), async (req, res) => {
 
 // ─── Route 2: Prompts → Client Document ──────────────────────────────────────
 
-app.post('/api/generate-doc', async (req, res) => {
+// ─── Route 2b: Workflow Stage+Column Doc ─────────────────────────────────────
+
+const WORKFLOW_DOC_PROMPT = `You are a senior AI systems consultant creating a WORKFLOW STAGE DIAGRAM document — like a Hunar/Swiggy AI calling workflow chart. This is NOT a call script reference card. It is a visual stage-by-stage workflow with channel columns (SSU, Referral, Non-Agency) and speech bubbles for each channel.
+
+OUTPUT: A complete self-contained <!DOCTYPE html> file. All CSS in <style>. No markdown. No code fences.
+
+DESIGN: Import Inter from Google Fonts. White page background. Print-exact colours.
+
+═══════════════════════════════════════════════
+LAYOUT — EXACT STRUCTURE TO REPRODUCE
+═══════════════════════════════════════════════
+
+HEADER SECTION:
+• Client logo area (left): bold client name + product name
+• Date (top right): formatted date
+• Title: "AI Calling Workflow" — large, bold, left-aligned
+• Channel column headers row: [Stage | Channel 1 | Channel 2 | Channel 3] as bold centered labels
+
+STAGE ROWS (one per stage/step in the flow):
+Each stage row has a coloured background (alternating: yellow #FFF9C4, green #E8F5E2, light grey #F4F7FA):
+• LEFT cell (20% width): Stage box — white rounded rectangle with bold stage number + name
+  Below the stage box: 
+  - "Action to take by User:" (bold) — bullet list
+  - "Info to provide by [Agent]:" (bold) — bullet list  
+  - "Stage Exit Metric:" (bold) — 1–2 lines
+• MIDDLE cells (channels, ~25% each): Speech bubble boxes for each channel variant
+  Speech bubble: white box with thin border, rounded corners, bottom-left tail
+  Content: the exact script/message for that channel
+• BOTTOM of each stage row: "Confirmation question:" in bold + the question text spanning full width
+
+ARROWS: vertical arrows between stage rows in the left column (↓)
+
+TERMINAL: final stage box at bottom showing the end state
+
+CSS PATTERNS:
+.workflow-wrap { max-width: 900px; margin: 0 auto; padding: 24px; font-family: Inter, sans-serif; }
+.col-headers { display: grid; grid-template-columns: 20% 1fr 1fr 1fr; gap: 0; margin-bottom: 0; }
+.col-hdr { text-align: center; font-weight: 800; font-size: 13px; padding: 10px; }
+.stage-row { display: grid; grid-template-columns: 20% 1fr 1fr 1fr; border: 1px solid #e0e0e0; margin-bottom: 0; }
+.stage-row:nth-child(odd)  { background: #FFF9C4; }
+.stage-row:nth-child(even) { background: #E8F5E2; }
+.stage-cell { padding: 14px; border-right: 1px solid #ddd; }
+.stage-box { background: white; border: 1.5px solid #aaa; border-radius: 8px; padding: 10px 12px; text-align: center; margin-bottom: 10px; }
+.stage-box .num { font-size: 11px; color: #666; }
+.stage-box .name { font-size: 13px; font-weight: 700; color: #1a1a1a; }
+.stage-info { font-size: 11px; line-height: 1.6; color: #333; }
+.stage-info strong { font-size: 11px; font-weight: 700; display: block; margin-top: 6px; }
+.speech-bubble { background: white; border: 1.5px solid #bbb; border-radius: 12px; padding: 10px 12px; font-size: 11px; font-style: italic; color: #333; line-height: 1.5; position: relative; margin-bottom: 6px; }
+.speech-bubble::after { content: ''; position: absolute; bottom: -10px; left: 16px; width: 0; height: 0; border-left: 8px solid transparent; border-right: 4px solid transparent; border-top: 10px solid #bbb; }
+.confirm-row { grid-column: 1/-1; padding: 8px 14px; border-top: 1px solid #ddd; background: rgba(255,255,255,0.5); }
+.confirm-row strong { font-size: 11px; font-weight: 700; }
+.confirm-row span { font-size: 11px; color: #333; }
+.arrow-row { display: flex; justify-content: flex-start; padding: 4px 0 4px 9%; }
+.arrow-row span { font-size: 20px; color: #555; }
+.terminal-box { background: white; border: 2px solid #aaa; border-radius: 8px; padding: 12px 18px; text-align: center; display: inline-block; margin: 8px 0 8px 5%; font-weight: 700; font-size: 13px; }
+
+═══════════════════════════════════════════════
+EXTRACTION RULES
+═══════════════════════════════════════════════
+• Extract every stage/step name and number
+• For each stage extract: user actions, agent info to provide, exit metric
+• For each channel (SSU/Referral/Non-Agency or equivalent) extract the exact script message
+• Extract the confirmation question for each stage
+• If channel names differ from SSU/Referral/Non-Agency, use the actual names from the prompt
+• If some channels share the same message, render it identically in both cells
+• Never invent content — only use what is in the source prompt
+• Wrap in proper <!DOCTYPE html> with embedded CSS`;
+
+app.post('/api/generate-workflow', async (req, res) => {
+  try {
+    const { prompt, client, product, version } = req.body;
+    if (!prompt) return res.status(400).json({ success: false, error: 'No prompt provided' });
+    if (!process.env.OPENAI_API_KEY) return res.status(500).json({ success: false, error: 'OpenAI API key not configured' });
+
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const userText = `Generate a workflow stage diagram HTML document.
+
+Client: ${client || 'Company'}
+Product: ${product || 'AI Calling Workflow'}
+Version: ${version || 'v1.0'}
+Date: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}
+
+=== WORKFLOW / CALL FLOW PROMPT ===
+${prompt}
+
+Output ONLY a complete <!DOCTYPE html> file. No code fences. No explanation.`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: WORKFLOW_DOC_PROMPT },
+        { role: 'user',   content: userText },
+      ],
+      max_tokens: 8000,
+      temperature: 0.15,
+    });
+
+    let content = response.choices[0].message.content.trim();
+    content = content.replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '').trim();
+    if (!content.startsWith('<!DOCTYPE') && !content.startsWith('<html')) {
+      const start = content.indexOf('<!DOCTYPE');
+      if (start > -1) content = content.slice(start);
+    }
+    res.json({ success: true, content });
+  } catch (error) {
+    console.error('Workflow doc error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ─── Route 2c: Prompt → Client Doc ───────────────────────────────────────────
+
   try {
     const { scriptPrompt, evalPrompt, client, product, version } = req.body;
 
