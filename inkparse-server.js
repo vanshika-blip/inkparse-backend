@@ -54,97 +54,240 @@ Analyze the image carefully and follow these rules:
 8. Output ONLY clean markdown. No backticks, no code fences, no explanations.
 9. Make it look professional and easy to read.`;
 
-// ─── Doc generation system prompt ─────────────────────────────────────────────
+// ─── PREMIUM DOC SYSTEM PROMPT ────────────────────────────────────────────────
 
-const DOC_SYSTEM_PROMPT = `You are a senior AI systems consultant who creates premium, print-ready HTML documentation for AI-powered call centre systems.
+const DOC_SYSTEM_PROMPT = `You are a senior AI systems consultant creating a PREMIUM, print-ready, COLOURFUL HTML reference document for an AI-powered call centre system. Think: a dense, visually rich consultant deliverable — like an internal design doc printed on A4. Colour is MANDATORY. Every section must use solid colour backgrounds, coloured borders, coloured headers. No plain white boxes.
 
-OUTPUT RULES — FOLLOW EXACTLY:
-1. Output a COMPLETE, self-contained HTML file starting with <!DOCTYPE html>.
-2. ALL CSS must be embedded inside a <style> block in <head>. No external stylesheets except Google Fonts.
-3. No markdown. No code fences. No explanation outside the HTML. Output ONLY the HTML file.
-4. The document must be dense and information-rich — designed to look like a premium consultant deliverable.
-5. Import Inter font from Google Fonts.
-6. Embed a print stylesheet: @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } .no-print { display: none !important; } }
+═══════════════════════════════════════════════════
+OUTPUT RULES — NON-NEGOTIABLE
+═══════════════════════════════════════════════════
+1. Output a COMPLETE, self-contained <!DOCTYPE html> file. Start with <!DOCTYPE html>.
+2. ALL CSS inside one <style> block in <head>. Zero external stylesheets except Google Fonts import.
+3. Import Inter from Google Fonts: @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+4. No markdown. No code fences. No explanation text outside the HTML. Output ONLY valid HTML.
+5. Embed this print CSS inside the <style> block:
+   @media print {
+     * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+     body { margin: 0; }
+     .no-print { display: none !important; }
+   }
 
-DESIGN SYSTEM — USE EXACTLY:
-  --primary: #0D2B4E
-  --accent: #007A7A
-  --highlight: #C9882A
-  --danger: #C0392B
-  --success: #1A7A4A
-  --bg: #F4F7FA
-  --bg-primary: #EBF0F7
-  --bg-accent: #E6F4F1
-  --bg-highlight: #FEF5E7
-  --text: #374151
-  --muted: #6B7280
-  --border: #D0D7E0
-  --white: #FFFFFF
+═══════════════════════════════════════════════════
+MANDATORY DESIGN SYSTEM — USE EXACTLY THESE VALUES
+═══════════════════════════════════════════════════
+CSS Variables in :root {
+  --navy:  #0D2B4E;
+  --teal:  #007A7A;
+  --gold:  #C9882A;
+  --red:   #C0392B;
+  --green: #1A7A4A;
+  --mint:  #E6F4F1;
+  --gold-l:#FEF5E7;
+  --navy-l:#EBF0F7;
+  --mist:  #F4F7FA;
+  --slate: #374151;
+  --grey:  #6B7280;
+  --rule:  #D0D7E0;
+  --white: #FFFFFF;
+}
 
-font-family: Inter, system-ui, sans-serif
-Page: max-width 1080px, margin 0 auto, padding 28px 32px, background white
-Base font: 9px for dense table/card content, 11-12px for body paragraphs
+Font: Inter, sans-serif
+Body: background #f0f4f8; padding: 20px;
+Page: max-width 794px; margin: 0 auto; background: white; padding: 28px 30px 24px;
 
-DOCUMENT STRUCTURE:
+Base content font sizes: 8–9px for cards/tables, 11–12px for body text. Dense and information-rich.
 
-PAGE 1 — CALL AGENT (if script prompt provided):
+═══════════════════════════════════════════════════
+COLOURED COMPONENT LIBRARY — USE THESE PATTERNS
+═══════════════════════════════════════════════════
 
-1. COVER HEADER
-   - Three-segment color bar at very top (primary 60% | accent 25% | highlight 15%)
-   - System + agent name (large, bold)
-   - Subtitle: extracted purpose one-liner
-   - Stat badge pills: step count, language, persona, primary goal
-   - 3px solid primary bottom border
+── HEADER BLOCK (top of every page) ──
+  <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:12px;border-bottom:3px solid var(--navy);margin-bottom:14px;">
+    Left: <h1 style="font-size:18px;font-weight:800;color:var(--navy)">Agent Name — <span style="color:var(--teal)">Role Title</span></h1>
+          <p style="font-size:9px;color:var(--grey);text-transform:uppercase;letter-spacing:0.5px">subtitle</p>
+    Right: badge pills (see below)
+  </div>
 
-2. TWO-COLUMN BODY (220px left | 1fr right, gap 14px)
-   LEFT: 3-4 info cards (border-left: 3px accent, bg-primary bg):
-     • Agent Identity card: name, gender, language rules, tone
-     • Decision Logic card: conditions → outcome table (full HTML table with thead)
-     • Pitch Structure card: blocks/phases + content
-     • Variables card: two-col grid of all variable names in teal
+── BADGE PILLS ──
+  <span style="background:var(--navy);color:white;padding:3px 8px;border-radius:20px;font-size:8.5px;font-weight:700">Label</span>
+  <span style="background:var(--teal);color:white;padding:3px 8px;border-radius:20px;font-size:8.5px;font-weight:700">Label</span>
+  <span style="background:var(--gold);color:white;padding:3px 8px;border-radius:20px;font-size:8.5px;font-weight:700">Label</span>
 
-   RIGHT: CALL FLOW — one flex row per step:
-     [Num pill 26px, navy/teal alternating] [Body: name bold + objective, flex-1] [Data 100px, teal] [Arrow 28px, gold bg]
-     6px connector between rows (1px line from left)
-     Decision/pitch steps: gold highlight body bg
-     Terminal step: danger bg
-     ALL steps must appear (don't skip any)
+── SIDE CARDS (left column) ──
+  <div style="background:var(--mist);border-radius:6px;padding:9px 10px;border-left:3px solid var(--teal);margin-bottom:10px;">
+    <div style="font-size:8px;font-weight:800;color:var(--grey);letter-spacing:0.8px;text-transform:uppercase;margin-bottom:5px;">CARD TITLE</div>
+    content rows using dot + text
+  </div>
+  Variants: border-left color → var(--gold) / var(--red) / var(--navy); background → var(--navy-l) for navy variant
 
-3. HANDLERS GRID — 4 cols, one card each (primary / accent / highlight / danger bg):
-   handler name | trigger | action
+── DOT ROWS ──
+  <div style="display:flex;align-items:flex-start;gap:5px;margin-top:3px;">
+    <span style="width:5px;height:5px;border-radius:50%;background:var(--teal);flex-shrink:0;margin-top:3px;display:inline-block;"></span>
+    <p style="font-size:8px;color:var(--slate);line-height:1.5;"><strong>Label:</strong> value</p>
+  </div>
 
-4. RULES STRIP — 5-6 inline chips:
-   NEVER → danger color | ALWAYS → success color
+── MINI TABLE ──
+  <table style="width:100%;border-collapse:collapse;margin-top:4px;">
+    <thead><tr>
+      <td style="font-size:8px;padding:3px 4px;border:1px solid var(--rule);background:var(--navy);color:white;font-weight:700;">Col A</td>
+      ...
+    </tr></thead>
+    <tbody>
+      <tr><td style="font-size:8px;padding:3px 4px;border:1px solid var(--rule);background:white;">...</td></tr>
+      <tr><td style="font-size:8px;padding:3px 4px;border:1px solid var(--rule);background:var(--mist);">...</td></tr>
+    </tbody>
+  </table>
 
-PAGE 2 — EVALUATION AI (if eval prompt provided):
+── CALL FLOW STEP ROW ──
+  Each step = a flex row with 4 segments:
+  [Number Pill] [Body] [Data Pill] [Arrow]
 
-5. EVAL HEADER — same style as Page 1 header
+  <div style="display:flex;align-items:stretch;">
+    <!-- Number pill: alternates navy / teal -->
+    <div style="width:26px;flex-shrink:0;background:var(--navy);color:white;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center;border-radius:4px 0 0 4px;">1</div>
+    <!-- Body -->
+    <div style="flex:1;background:var(--mist);padding:5px 7px;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);">
+      <div style="font-size:9px;font-weight:700;color:var(--navy);">Step Name</div>
+      <div style="font-size:7.5px;color:var(--slate);line-height:1.4;margin-top:1px;">Objective text</div>
+    </div>
+    <!-- Data pill -->
+    <div style="width:100px;flex-shrink:0;background:var(--navy-l);padding:5px 6px;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);">
+      <div style="font-size:6.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--grey);">Saves / Branches</div>
+      <div style="font-size:7.5px;color:var(--teal);font-weight:600;margin-top:1px;">variable_name</div>
+    </div>
+    <!-- Arrow -->
+    <div style="width:28px;flex-shrink:0;background:var(--gold-l);display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--gold);font-weight:700;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);border-radius:0 4px 4px 0;">→</div>
+  </div>
+  <!-- 6px connector between steps -->
+  <div style="margin-left:13px;width:1px;height:6px;background:var(--teal);"></div>
 
-6. EVAL FLOW DIAGRAM — horizontal nodes:
-   [Input] › [Duration Check] › [branches] › [Extract] › [Score] › [Scans] › [JSON Out]
-   Node: colored rounded box + sublabel. Branch: two bullets (red short / green full).
-   Beside it: quality score rubric table + lead classification chips
+  Special step: body background var(--gold-l), number pill background var(--gold)
+  Terminal step: body background #FFF0F0, number pill background var(--red)
 
-7. SPECIAL DETECTION BANNER (if any) — dark full-width band with category chips + escalation action
+── HANDLER CARDS (4-col grid) ──
+  <div style="background:var(--navy);border-radius:5px;padding:7px 8px;">
+    <div style="font-size:8px;font-weight:800;color:white;letter-spacing:0.3px;">HANDLER NAME</div>
+    <div style="font-size:7px;color:rgba(255,255,255,0.75);margin-top:2px;line-height:1.4;">Trigger: …</div>
+    <div style="font-size:7px;color:rgba(255,255,255,0.9);margin-top:3px;line-height:1.4;border-top:1px solid rgba(255,255,255,0.2);padding-top:3px;">Action: …</div>
+  </div>
+  Variants: background var(--teal) / var(--gold) / var(--red)
 
-8. OUTPUT GROUPS GRID — one card per JSON group:
-   Colored header (group # + name) | Body: key fields + types | Footer: one-line purpose
+── RULE CHIPS (5-col strip) ──
+  <div style="border-radius:5px;padding:6px 7px;border:1.5px solid var(--rule);">
+    <div style="font-size:7px;font-weight:800;letter-spacing:0.6px;text-transform:uppercase;margin-bottom:2px;color:var(--red);">Never</div>
+    <div style="font-size:7.5px;color:var(--slate);line-height:1.45;">rule text</div>
+  </div>
+  Label colors: Never → var(--red) | Always → var(--teal) | Rule → var(--navy)
 
-9. BOTTOM 3-CARD ROW:
-   • Core Extraction Rules (numbered)
-   • Objection/Issue Categories (numbered, most common ★ first)
-   • Downstream Use: CRM / QA / Coaching / Escalation
+── GROUP CARDS (for JSON output groups, evaluation section) ──
+  <div style="border-radius:5px;overflow:hidden;border:1px solid var(--rule);">
+    <div style="padding:5px 6px;background:var(--navy);color:white;">
+      <div style="font-size:6.5px;opacity:0.8;margin-bottom:1px;">GROUP N</div>
+      <div style="font-size:7.5px;font-weight:800;">Group Name</div>
+    </div>
+    <div style="padding:5px 6px;background:var(--mist);">
+      field rows using dot + label pattern
+      <div style="font-size:6.5px;color:var(--grey);font-style:italic;margin-top:3px;">purpose note</div>
+    </div>
+  </div>
+  Header variants: var(--teal) / var(--gold) / #2D5F8A / #8B3A2A / #1A7A4A / #4A2080 / #B45309 / #0D5C4E
 
-10. VIOLATION STRIP — 6 chips: VIOLATION (danger) | REQUIRED (success) | CRITICAL (highlight)
+── EVAL FLOW NODES ──
+  Horizontal flex row with nodes + arrows:
+  <div style="background:var(--navy);color:white;border-radius:5px;padding:6px 9px;font-size:8px;font-weight:700;text-align:center;">
+    Node Label<div style="font-size:6.5px;font-weight:400;opacity:0.85;margin-top:1px;">sublabel</div>
+  </div>
+  Arrow: <span style="color:var(--grey);font-size:14px;padding:0 5px;">›</span>
 
-FOOTER (both pages): system name · confidential · page number hint
+── SCORE RUBRIC TABLE ──
+  Each row: [coloured badge] [description]
+  Badges: 5.0=#0D2B4E | 4-4.9=#007A7A | 3-3.9=#C9882A | 2-2.9=#E07B39 | 1-1.9=#C0392B | 0-0.9=#7B1818
 
-EXTRACTION RULES:
-- Extract EVERY step, variable, handler, branch, rule from the agent prompt — nothing omitted
-- Extract EVERY output field, scoring band, violation flag from the eval prompt
-- Use actual agent name, brand, language in all content
-- Never use placeholder text — every word comes from the source prompts
-- If only one prompt provided, generate only the relevant page`;
+── GLP / ALERT BANNER ──
+  <div style="background:var(--navy);border-radius:5px;padding:8px 12px;display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+    <div style="font-size:9px;font-weight:800;color:var(--gold);flex-shrink:0;">⚑ BANNER TITLE</div>
+    category chips + action text
+  </div>
+
+── VIOLATION STRIP ──
+  6 chips in a grid:
+  VIOLATION label: color var(--red)
+  REQUIRED label: color var(--green)
+  CRITICAL label: color var(--gold)
+
+═══════════════════════════════════════════════════
+DOCUMENT STRUCTURE
+═══════════════════════════════════════════════════
+
+If script prompt provided → PAGE 1: CALL AGENT REFERENCE
+
+  SECTION A — HEADER
+    • System name + agent name (large, bold, navy/teal)
+    • Subtitle: brand · doc type · flow description
+    • Badge pills: step count, language, agent persona, primary goal
+
+  SECTION B — MAIN GRID (220px left | 1fr right)
+
+    LEFT COLUMN — 4 info cards:
+    1. Agent Identity card (navy variant): name, gender, language, goal, tone
+    2. Package/Decision Logic card (gold variant): decision table with thead navy, show all conditions → outcomes → prices
+    3. Pitch Structure card (teal variant): all pitch blocks/phases with dot rows
+    4. Variables card (teal variant): 2-col grid of ALL variable names in teal colour
+
+    RIGHT COLUMN — FULL CALL FLOW:
+    • One step row per step (NEVER skip any step)
+    • Alternate number pill navy / teal
+    • Decision/special steps: gold body background
+    • Terminal/end step: red body background
+    • 6px vertical connector line between each step
+
+  SECTION C — HANDLERS GRID (4 columns)
+    One coloured card per handler type: navy / teal / gold / red
+
+  SECTION D — RULES STRIP (5-6 chips)
+    Never (red) | Always (green) | Rule (navy)
+
+  PAGE FOOTER: system · agent name · Confidential | hard stop rule
+
+──────────────────────────────────────────────────
+If eval prompt provided → PAGE 2: EVALUATION AI
+
+  SECTION E — EVAL HEADER (same style as Page 1 header)
+    Badges: output group count, field count, score range, special detections
+
+  SECTION F — TOP ROW GRID (1fr right | 260px scoring)
+    Left: EVAL FLOW horizontal diagram
+      Nodes: Transcript → Duration Check → branches → Extract → Score → Scan → JSON Out
+      After branches: two bullet lines (< threshold = skip, >= threshold = full eval)
+    Right: Quality Score rubric table + Lead Intent classification chips
+
+  SECTION G — SPECIAL DETECTION BANNER (if applicable, e.g. GLP-1, escalation)
+    Full-width navy banner with category chips + escalation action
+
+  SECTION H — OUTPUT GROUPS GRID (auto columns, 1 card per JSON group)
+    Each card: coloured header (group # + name) | body: key fields with type | italic footer note
+    Use distinct header colours for each group (cycle through provided colours)
+
+  SECTION I — BOTTOM 3-CARD ROW
+    Card 1 (navy): Core Extraction / Data Rules (numbered)
+    Card 2 (dark red #8B3A2A): Issue/Objection Categories (numbered, most important ★ first)
+    Card 3 (teal): Downstream Use (CRM / QA / Coaching / Escalation rows)
+
+  SECTION J — VIOLATION STRIP (6 chips)
+    Violations (red) | Required (green) | Critical checks (gold)
+
+  PAGE FOOTER: system name · Confidential | output format note
+
+═══════════════════════════════════════════════════
+EXTRACTION RULES — NEVER VIOLATE
+═══════════════════════════════════════════════════
+• Extract EVERY step from the script prompt — never skip or combine steps
+• Extract EVERY variable, handler, branch, rule verbatim
+• Extract EVERY output field, scoring band, violation flag from the eval prompt
+• Use the ACTUAL agent name, brand, language throughout — never "Agent Name" placeholders
+• Every word of content comes from the source prompts — no invention
+• If only one prompt is provided, generate only the relevant page
+• If both prompts are provided, generate BOTH pages in sequence in the same HTML file`;
 
 // ─── Route 1: Image → Flowchart or Notes ─────────────────────────────────────
 
@@ -208,7 +351,12 @@ Date: ${new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'long', 
 ${scriptPrompt ? `=== CALL SCRIPT / AGENT PROMPT ===\n${scriptPrompt}` : ''}
 ${evalPrompt   ? `\n=== CALL EVALUATION PROMPT ===\n${evalPrompt}` : ''}
 
-Output a COMPLETE HTML file starting with <!DOCTYPE html>. Embed all CSS in <head>. Be exhaustive — extract every step, variable, handler, rule, evaluation field from the prompts above.`;
+CRITICAL REQUIREMENTS:
+- Output ONLY a complete <!DOCTYPE html> file — no explanation, no code fences
+- Use ALL the coloured component patterns from the design system
+- Every section must have colour: coloured card headers, coloured borders, coloured badges
+- Extract and render EVERY step, variable, handler, rule, field from the prompts above
+- Be exhaustive and dense — this is a premium consultant document`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -217,11 +365,17 @@ Output a COMPLETE HTML file starting with <!DOCTYPE html>. Embed all CSS in <hea
         { role: 'user',   content: userText }
       ],
       max_tokens: 16000,
-      temperature: 0.2,
+      temperature: 0.15,
     });
 
     let content = response.choices[0].message.content.trim();
+    // Strip any accidental markdown fences
     content = content.replace(/^```[\w]*\n?/, '').replace(/\n?```$/, '').trim();
+    // Ensure it starts with DOCTYPE
+    if (!content.startsWith('<!DOCTYPE') && !content.startsWith('<html')) {
+      const start = content.indexOf('<!DOCTYPE');
+      if (start > -1) content = content.slice(start);
+    }
 
     res.json({ success: true, content });
 
